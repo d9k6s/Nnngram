@@ -406,6 +406,11 @@
     <string name="DeepLxApiUrlHint">For example: https://example.com/api/(API_TOKEN)/translate</string>
     <string name="DeepLxApiToken">DeepLX API Token</string>
     <string name="DeepLxApiTokenHint">Token used to replace (API_TOKEN) in the URL</string>
+    <string name="DeepLxMaxCharacters">Maximum characters per request</string>
+    <string name="DeepLxRequestsPerSecond">Maximum requests per second</string>
+    <string name="DeepLxPreserveFormatting">Preserve message formatting</string>
+    <string name="DeepLxPreserveFormattingAbout">Keep line breaks, spacing, and Telegram text formatting when possible.</string>
+    <string name="DeepLxValueRange">Enter a number from %1$d to %2$d.</string>
     <string name="DeepLxNotSet">Not set</string>
     <string name="DeepLxTestConnection">Test DeepLX connection</string>
     <string name="DeepLxApiUrlRequired">Enter the DeepLX API URL first.</string>

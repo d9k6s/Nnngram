@@ -7,7 +7,11 @@ on:
       - main
     paths:
       - '.github/workflows/test-apk.yml'
+      - 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java'
       - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/activity/GeneralSettingActivity.java'
+      - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/helpers/TranslateHelper.kt'
+      - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/translate/BaseTranslator.kt'
+      - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/translate/providers/DeepLxTextProcessor.kt'
       - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/translate/providers/DeepLxranslator.kt'
       - 'TMessagesProj/src/main/java/xyz/nextalone/nnngram/utils/Defines.kt'
       - 'TMessagesProj/src/main/res/values/strings_nullgram.xml'

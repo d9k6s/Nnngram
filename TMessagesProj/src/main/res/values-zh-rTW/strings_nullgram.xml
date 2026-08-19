@@ -378,6 +378,11 @@
     <string name="DeepLxApiUrlHint">例如：https://example.com/api/(API_TOKEN)/translate</string>
     <string name="DeepLxApiToken">DeepLX API Token</string>
     <string name="DeepLxApiTokenHint">用來取代網址中 (API_TOKEN) 的 Token</string>
+    <string name="DeepLxMaxCharacters">每次請求的最大字元數</string>
+    <string name="DeepLxRequestsPerSecond">每秒最大請求數</string>
+    <string name="DeepLxPreserveFormatting">保留訊息格式</string>
+    <string name="DeepLxPreserveFormattingAbout">盡可能保留換行、空白及 Telegram 文字格式。</string>
+    <string name="DeepLxValueRange">請輸入 %1$d 至 %2$d 之間的數字。</string>
     <string name="DeepLxNotSet">尚未設定</string>
     <string name="DeepLxTestConnection">測試 DeepLX 連線</string>
     <string name="DeepLxApiUrlRequired">請先輸入 DeepLX API 網址。</string>

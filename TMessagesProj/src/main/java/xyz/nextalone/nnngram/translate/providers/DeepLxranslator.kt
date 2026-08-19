@@ -25,15 +25,23 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import org.telegram.tgnet.SerializedData
+import org.telegram.tgnet.TLRPC
 import xyz.nextalone.gen.Config
 import xyz.nextalone.nnngram.translate.BaseTranslator
+import xyz.nextalone.nnngram.translate.FormattedText
 import xyz.nextalone.nnngram.utils.Log
 import java.io.IOException
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.ArrayList
 import java.util.Locale
+import java.util.TreeSet
 
 /**
  * @author NextAlone
@@ -43,6 +51,13 @@ import java.util.Locale
 object DeepLxTranslator : BaseTranslator() {
 
     const val API_TOKEN_PLACEHOLDER = "(API_TOKEN)"
+    const val MIN_MAX_CHARACTERS = 1
+    const val MAX_MAX_CHARACTERS = 100_000
+    const val MIN_REQUESTS_PER_SECOND = 1
+    const val MAX_REQUESTS_PER_SECOND = 100
+
+    private val rateLimitMutex = Mutex()
+    private var nextRequestAtNanos = 0L
 
     private val targetLanguages = listOf(
         "ar", "bg", "cs", "da", "de", "de-CH", "el", "en-GB", "en-US",
@@ -78,6 +93,12 @@ object DeepLxTranslator : BaseTranslator() {
         canonicalTargetLanguage(language)
     }
 
+    override fun convertLanguageCode(code: String, reverse: Boolean): String = if (reverse) {
+        code.replace('_', '-').lowercase(Locale.ROOT)
+    } else {
+        canonicalTargetLanguage(code)
+    }
+
     private fun canonicalTargetLanguage(language: String): String {
         val normalized = language.replace('_', '-').lowercase(Locale.ROOT)
         return when (normalized) {
@@ -92,15 +113,41 @@ object DeepLxTranslator : BaseTranslator() {
         }
     }
 
-    override suspend fun translateText(text: String, from: String, to: String): RequestResult {
-        Log.d("text: $text")
-        Log.d("from: $from")
-        Log.d("to: $to")
-        if (from == to) {
-            return RequestResult(from, text)
+    override suspend fun translate(source: Any, from: String, to: String): TranslateResult {
+        if (source !is FormattedText || !Config.deepLxPreserveFormatting) {
+            return super.translate(source, from, to)
         }
-        val apiUrl = resolveApiUrl()
+        return translateFormattedText(source, canonicalTargetLanguage(to))
+    }
 
+    override suspend fun translateText(text: String, from: String, to: String): RequestResult {
+        val parts = DeepLxTextProcessor.split(
+            text,
+            Config.deepLxMaxCharacters.coerceIn(MIN_MAX_CHARACTERS, MAX_MAX_CHARACTERS),
+            Config.deepLxPreserveFormatting
+        )
+        val translated = StringBuilder()
+        var detectedLanguage = from
+        for (part in parts) {
+            if (!part.translate) {
+                translated.append(part.text)
+                continue
+            }
+            val result = requestChunk(part.text, "auto", canonicalTargetLanguage(to))
+            if (result.error != null || result.result == null) {
+                return RequestResult(detectedLanguage, null, result.error ?: HttpStatusCode.InternalServerError)
+            }
+            if (result.from.isNotBlank() && !result.from.equals("auto", ignoreCase = true)) {
+                detectedLanguage = result.from
+            }
+            translated.append(result.result)
+        }
+        return RequestResult(detectedLanguage, translated.toString())
+    }
+
+    private suspend fun requestChunk(text: String, from: String, to: String): RequestResult {
+        val apiUrl = resolveApiUrl()
+        awaitRateLimit()
         val response = try {
             client.post(apiUrl) {
                 contentType(ContentType.Application.Json)
@@ -110,24 +157,132 @@ object DeepLxTranslator : BaseTranslator() {
             // A request exception may contain the expanded URL. Do not leak API tokens to logs/UI.
             throw IOException("DeepLX request failed (${e.javaClass.simpleName})")
         }
-        response.let {
-            when (it.status) {
-                HttpStatusCode.OK -> {
-                    val jsonObject = JSONObject(it.bodyAsText())
-                    if (jsonObject.has("error")) {
-                        throw IOException(jsonObject.getString("message"))
-                    }
-                    return RequestResult(
-                        jsonObject.optString("source_lang", from),
-                        jsonObject.getString("data")
-                    )
-                }
 
-                else -> {
-                    Log.w(it.bodyAsText())
-                    return RequestResult(from, null, it.status)
-                }
+        val responseBody = response.bodyAsText()
+        val jsonObject = runCatching { JSONObject(responseBody) }.getOrNull()
+        if (response.status == HttpStatusCode.OK && jsonObject != null) {
+            val responseCode = jsonObject.optInt("code", HttpStatusCode.OK.value)
+            if (jsonObject.has("error") || responseCode !in 200..299) {
+                val message = jsonObject.optString("message", "DeepLX returned an error")
+                return RequestResult(from, null, HttpStatusCode(responseCode, message.take(160)))
             }
+            if (!jsonObject.has("data") || jsonObject.isNull("data")) {
+                return RequestResult(from, null, HttpStatusCode(500, "DeepLX response is missing data"))
+            }
+            val data = jsonObject.getString("data")
+            return RequestResult(jsonObject.optString("source_lang", from), data)
+        }
+
+        val message = jsonObject?.optString("message")
+            ?.takeIf { it.isNotBlank() }
+            ?.take(160)
+            ?: response.status.description
+        Log.w("DeepLX request failed: HTTP ${response.status.value} ($message)")
+        return RequestResult(from, null, HttpStatusCode(response.status.value, message))
+    }
+
+    private suspend fun awaitRateLimit() {
+        rateLimitMutex.withLock {
+            val requestsPerSecond = Config.deepLxRequestsPerSecond.coerceIn(
+                MIN_REQUESTS_PER_SECOND,
+                MAX_REQUESTS_PER_SECOND
+            )
+            val intervalNanos = 1_000_000_000L / requestsPerSecond
+            val now = System.nanoTime()
+            val waitNanos = nextRequestAtNanos - now
+            if (waitNanos > 0) {
+                delay((waitNanos + 999_999L) / 1_000_000L)
+            }
+            nextRequestAtNanos = maxOf(nextRequestAtNanos, System.nanoTime()) + intervalNanos
+        }
+    }
+
+    private suspend fun translateFormattedText(source: FormattedText, to: String): TranslateResult {
+        val text = source.text
+        val validEntities = source.entities.filter { entity ->
+            entity.offset >= 0 && entity.length > 0 && entity.offset <= text.length &&
+                entity.length <= text.length - entity.offset
+        }
+        if (validEntities.isEmpty()) {
+            val result = translateText(text, "auto", to)
+            return TranslateResult(result.from, result.result?.let { FormattedText(it, ArrayList()) }, result.error)
+        }
+
+        val boundaries = TreeSet<Int>()
+        boundaries.add(0)
+        boundaries.add(text.length)
+        validEntities.forEach { entity ->
+            boundaries.add(entity.offset)
+            boundaries.add(entity.offset + entity.length)
+        }
+
+        val positions = boundaries.toList()
+        val mappedOffsets = HashMap<Int, Int>()
+        val translated = StringBuilder()
+        var detectedLanguage = "auto"
+        for (index in 0 until positions.lastIndex) {
+            val start = positions[index]
+            val end = positions[index + 1]
+            mappedOffsets[start] = translated.length
+            val segment = text.substring(start, end)
+            val protected = validEntities.any { entity ->
+                entity.offset <= start && entity.offset + entity.length >= end && isProtectedEntity(entity)
+            }
+            if (protected) {
+                translated.append(segment)
+            } else {
+                val result = translateText(segment, "auto", to)
+                if (result.error != null || result.result == null) {
+                    return TranslateResult(detectedLanguage, null, result.error ?: HttpStatusCode.InternalServerError)
+                }
+                if (result.from.isNotBlank() && !result.from.equals("auto", ignoreCase = true)) {
+                    detectedLanguage = result.from
+                }
+                translated.append(result.result)
+            }
+            mappedOffsets[end] = translated.length
+        }
+
+        val translatedEntities = ArrayList<TLRPC.MessageEntity>()
+        validEntities.forEach { entity ->
+            val newStart = mappedOffsets[entity.offset] ?: return@forEach
+            val newEnd = mappedOffsets[entity.offset + entity.length] ?: return@forEach
+            if (newEnd <= newStart) return@forEach
+            cloneEntity(entity)?.let { copy ->
+                copy.offset = newStart
+                copy.length = newEnd - newStart
+                translatedEntities.add(copy)
+            }
+        }
+        return TranslateResult(detectedLanguage, FormattedText(translated.toString(), translatedEntities))
+    }
+
+    private fun isProtectedEntity(entity: TLRPC.MessageEntity): Boolean = when (entity) {
+        is TLRPC.TL_messageEntityBold,
+        is TLRPC.TL_messageEntityItalic,
+        is TLRPC.TL_messageEntityUnderline,
+        is TLRPC.TL_messageEntityStrike,
+        is TLRPC.TL_messageEntitySpoiler,
+        is TLRPC.TL_messageEntityBlockquote,
+        is TLRPC.TL_messageEntityTextUrl -> false
+        else -> true
+    }
+
+    private fun cloneEntity(entity: TLRPC.MessageEntity): TLRPC.MessageEntity? {
+        val writer = SerializedData(entity.objectSize)
+        return try {
+            entity.serializeToStream(writer)
+            val reader = SerializedData(writer.toByteArray())
+            try {
+                TLRPC.MessageEntity.TLdeserialize(reader, reader.readInt32(true), true)
+            } finally {
+                reader.cleanup()
+            }
+        } catch (e: Exception) {
+            Log.w("Unable to preserve a translated message entity: ${e.javaClass.simpleName}")
+            null
+        } finally {
+            writer.cleanup()
         }
     }
 

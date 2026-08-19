@@ -376,6 +376,7 @@ import xyz.nextalone.nnngram.helpers.MentionReadHelper;
 import xyz.nextalone.nnngram.helpers.QrHelper;
 import xyz.nextalone.nnngram.helpers.TranslateHelper;
 import xyz.nextalone.nnngram.helpers.TranslateHelper.Status;
+import xyz.nextalone.nnngram.translate.FormattedText;
 import xyz.nextalone.nnngram.translate.LanguageDetectorTimeout;
 import xyz.nextalone.nnngram.ui.BackButtonRecentMenu;
 import xyz.nextalone.nnngram.ui.QuickSendMediaPopup;
@@ -34049,6 +34050,13 @@ public class ChatActivity extends BaseFragment implements
         Object message;
         if (messageObject.isPoll()) {
             message = original;
+        } else if (Config.deepLxPreserveFormatting &&
+                TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator &&
+                messageObject.messageOwner.entities != null && !messageObject.messageOwner.entities.isEmpty()) {
+            message = new FormattedText(
+                messageObject.messageOwner.message,
+                new ArrayList<>(messageObject.messageOwner.entities)
+            );
         } else {
             message = messageObject.messageOwner.message;
         }
@@ -34063,6 +34071,23 @@ public class ChatActivity extends BaseFragment implements
                     messageObject.messageOwner.entities = new ArrayList<>();
                 } else {
                     messageObject.messageOwner.message = messageObject.messageOwner.message + "\n" + "--------" + "\n" + translation;
+                }
+            } else if (translation instanceof FormattedText) {
+                FormattedText formattedText = (FormattedText) translation;
+                if (original instanceof Pair) {
+                    messageObject.messageOwner.message = formattedText.getText();
+                    messageObject.messageOwner.entities = new ArrayList<>(formattedText.getEntities());
+                } else {
+                    String separator = "\n--------\n";
+                    int translatedOffset = messageObject.messageOwner.message.length() + separator.length();
+                    messageObject.messageOwner.message = messageObject.messageOwner.message + separator + formattedText.getText();
+                    ArrayList<TLRPC.MessageEntity> entities = messageObject.messageOwner.entities == null ?
+                        new ArrayList<>() : new ArrayList<>(messageObject.messageOwner.entities);
+                    for (TLRPC.MessageEntity entity : formattedText.getEntities()) {
+                        entity.offset += translatedOffset;
+                        entities.add(entity);
+                    }
+                    messageObject.messageOwner.entities = entities;
                 }
             } else if (translation instanceof TLRPC.TL_poll) {
                 ((TLRPC.TL_messageMediaPoll) messageObject.messageOwner.media).poll = (TLRPC.TL_poll) translation;
@@ -39175,6 +39200,8 @@ public class ChatActivity extends BaseFragment implements
                             (String lang) -> {
                                 if (!TranslateHelper.isLanguageRestricted(lang)) {
                                     translateMessage(messageObject, TranslateHelper.stripLanguageCode(lang), true);
+                                } else {
+                                    messageObject.translating = false;
                                 }
                             },
                             (Exception e) -> {
