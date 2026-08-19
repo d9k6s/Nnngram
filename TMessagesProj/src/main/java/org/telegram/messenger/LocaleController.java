@@ -413,6 +413,8 @@ public class LocaleController {
 
     private Locale currentLocale;
     private Locale systemDefaultLocale;
+    private Locale localizedResourcesLocale;
+    private Context localizedResourcesContext;
     private PluralRules currentPluralRules;
     private LocaleInfo currentLocaleInfo;
     private HashMap<String, String> localeValues = new HashMap<>();
@@ -891,6 +893,48 @@ public class LocaleController {
 
     public Locale getSystemDefaultLocale() {
         return systemDefaultLocale;
+    }
+
+    private static Locale getLocaleForLanguage(LocaleInfo localeInfo) {
+        String shortName = localeInfo.shortName == null ? "" : localeInfo.shortName.toLowerCase(Locale.US);
+        String baseLangCode = localeInfo.baseLangCode == null ? "" : localeInfo.baseLangCode.toLowerCase(Locale.US);
+        String pluralLangCode = localeInfo.pluralLangCode == null ? "" : localeInfo.pluralLangCode.toLowerCase(Locale.US);
+        // Telegram's built-in Chinese packs use server aliases instead of Android locale tags.
+        if ("taiwan".equals(shortName) || baseLangCode.startsWith("zh_hant") || pluralLangCode.equals("zh_tw") || pluralLangCode.equals("zh_hk") || pluralLangCode.equals("zh_mo")) {
+            return Locale.forLanguageTag("zh-Hant-TW");
+        }
+        if ("moecn".equals(shortName) || baseLangCode.startsWith("zh_hans") || pluralLangCode.equals("zh_cn") || pluralLangCode.equals("zh_sg")) {
+            return Locale.forLanguageTag("zh-Hans-CN");
+        }
+
+        String languageCode;
+        if (!TextUtils.isEmpty(localeInfo.pluralLangCode)) {
+            languageCode = localeInfo.pluralLangCode;
+        } else if (!TextUtils.isEmpty(localeInfo.baseLangCode)) {
+            languageCode = localeInfo.baseLangCode;
+        } else {
+            languageCode = localeInfo.shortName;
+        }
+        return Locale.forLanguageTag(languageCode.replace('_', '-'));
+    }
+
+    private Context getLocalizedResourcesContext() {
+        Locale locale = currentLocale == null ? Locale.getDefault() : currentLocale;
+        synchronized (this) {
+            if (localizedResourcesContext == null || !locale.equals(localizedResourcesLocale)) {
+                // The application Resources configuration can be replaced by a later device configuration.
+                // Keep bundled fallback strings tied to the language selected inside Nnngram.
+                Configuration configuration = new Configuration(ApplicationLoader.applicationContext.getResources().getConfiguration());
+                configuration.setLocale(locale);
+                localizedResourcesContext = ApplicationLoader.applicationContext.createConfigurationContext(configuration);
+                localizedResourcesLocale = locale;
+            }
+            return localizedResourcesContext;
+        }
+    }
+
+    private String getLocalizedString(@StringRes int res) {
+        return getLocalizedResourcesContext().getString(res);
     }
 
     public boolean isCurrentLocalLocale() {
@@ -1390,20 +1434,7 @@ public class LocaleController {
             }
         }
         try {
-            Locale newLocale;
-            String[] args;
-            if (!TextUtils.isEmpty(localeInfo.pluralLangCode)) {
-                args = localeInfo.pluralLangCode.split("_");
-            } else if (!TextUtils.isEmpty(localeInfo.baseLangCode)) {
-                args = localeInfo.baseLangCode.split("_");
-            } else {
-                args = localeInfo.shortName.split("_");
-            }
-            if (args.length == 1) {
-                newLocale = new Locale(args[0]);
-            } else {
-                newLocale = new Locale(args[0], args[1]);
-            }
+            Locale newLocale = getLocaleForLanguage(localeInfo);
             if (override) {
                 languageOverride = localeInfo.shortName;
 
@@ -1426,9 +1457,6 @@ public class LocaleController {
 
             if (!TextUtils.isEmpty(currentLocaleInfo.pluralLangCode)) {
                 currentPluralRules = allRules.get(currentLocaleInfo.pluralLangCode);
-            }
-            if (currentPluralRules == null) {
-                currentPluralRules = allRules.get(args[0]);
             }
             if (currentPluralRules == null) {
                 currentPluralRules = allRules.get(currentLocale.getLanguage());
@@ -1499,12 +1527,12 @@ public class LocaleController {
             switch (key) {
                 case "AppName":
                 case "AppNameBeta": {
-                    return ApplicationLoader.applicationContext.getString(R.string.NullgramName);
+                    return getLocalizedString(R.string.NullgramName);
                 }
                 case "TelegramFeaturesUrl":
                     return "t.me/nagram_group";
                 case "UnsupportedMedia":
-                    return ApplicationLoader.applicationContext.getString(R.string.UnsupportedMediaNullgram);
+                    return getLocalizedString(R.string.UnsupportedMediaNullgram);
                 default:
                     break;
             }
@@ -1518,11 +1546,11 @@ public class LocaleController {
             }
             if (value == null) {
                 try {
-                    value = ApplicationLoader.applicationContext.getString(res);
+                    value = getLocalizedString(res);
                 } catch (Exception e) {
                     if (fallbackRes != 0) {
                         try {
-                            value = ApplicationLoader.applicationContext.getString(fallbackRes);
+                            value = getLocalizedString(fallbackRes);
                         } catch (Exception ignored) {}
                     }
                     FileLog.e(e);
@@ -1549,7 +1577,7 @@ public class LocaleController {
         if (value == null) {
             int resourceId = ApplicationLoader.applicationContext.getResources().getIdentifier(key, "string", ApplicationLoader.applicationContext.getPackageName());
             if (resourceId != 0) {
-                value = ApplicationLoader.applicationContext.getString(resourceId);
+                value = getInstance().getLocalizedString(resourceId);
             }
         }
         return value;
@@ -1689,12 +1717,12 @@ public class LocaleController {
             if (value == null) {
                 try {
                     int resourceId = ApplicationLoader.applicationContext.getResources().getIdentifier(param, "string", ApplicationLoader.applicationContext.getPackageName());
-                    value = ApplicationLoader.applicationContext.getString(resourceId);
+                    value = getInstance().getLocalizedString(resourceId);
                 } catch (Exception e2) {}
             }
             if (value == null) {
                 int resourceId = ApplicationLoader.applicationContext.getResources().getIdentifier(key + "_other", "string", ApplicationLoader.applicationContext.getPackageName());
-                value = ApplicationLoader.applicationContext.getString(resourceId);
+                value = getInstance().getLocalizedString(resourceId);
             }
             value = value.replace("%d", "%1$s");
             value = value.replace("%1$d", "%1$s");
@@ -1758,17 +1786,17 @@ public class LocaleController {
                 if (value == null) {
                     if (res != 0) {
                         try {
-                            value = ApplicationLoader.applicationContext.getString(res);
+                            value = getInstance().getLocalizedString(res);
                         } catch (Exception e) {
                             if (fallbackRes != 0) {
                                 try {
-                                    value = ApplicationLoader.applicationContext.getString(fallbackRes);
+                                    value = getInstance().getLocalizedString(fallbackRes);
                                 } catch (Exception ignored) {}
                             }
                         }
                     } else if (fallbackRes != 0) {
                         try {
-                            value = ApplicationLoader.applicationContext.getString(fallbackRes);
+                            value = getInstance().getLocalizedString(fallbackRes);
                         } catch (Exception ignored) {}
                     }
                 }
@@ -1817,17 +1845,17 @@ public class LocaleController {
                 if (value == null) {
                     if (res != 0) {
                         try {
-                            value = ApplicationLoader.applicationContext.getString(res);
+                            value = getInstance().getLocalizedString(res);
                         } catch (Exception e) {
                             if (fallbackRes != 0) {
                                 try {
-                                    value = ApplicationLoader.applicationContext.getString(fallbackRes);
+                                    value = getInstance().getLocalizedString(fallbackRes);
                                 } catch (Exception ignored) {}
                             }
                         }
                     } else if (fallbackRes != 0) {
                         try {
-                            value = ApplicationLoader.applicationContext.getString(fallbackRes);
+                            value = getInstance().getLocalizedString(fallbackRes);
                         } catch (Exception ignored) {}
                     }
                 }
@@ -3245,20 +3273,7 @@ public class LocaleController {
                 saveOtherLanguages();
                 try {
                     if (currentLocaleInfo == localeInfo) {
-                        Locale newLocale;
-                        String[] args;
-                        if (!TextUtils.isEmpty(localeInfo.pluralLangCode)) {
-                            args = localeInfo.pluralLangCode.split("_");
-                        } else if (!TextUtils.isEmpty(localeInfo.baseLangCode)) {
-                            args = localeInfo.baseLangCode.split("_");
-                        } else {
-                            args = localeInfo.shortName.split("_");
-                        }
-                        if (args.length == 1) {
-                            newLocale = new Locale(args[0]);
-                        } else {
-                            newLocale = new Locale(args[0], args[1]);
-                        }
+                        Locale newLocale = getLocaleForLanguage(localeInfo);
                         languageOverride = localeInfo.shortName;
 
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
