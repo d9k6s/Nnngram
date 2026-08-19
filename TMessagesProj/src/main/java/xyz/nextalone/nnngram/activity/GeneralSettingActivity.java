@@ -336,6 +336,7 @@ public class GeneralSettingActivity extends BaseActivity {
             editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
             editText.setSingleLine(true);
             editText.setText(Config.getDeepLxApi());
+            applyDeepLxInputTheme(editText);
             FrameLayout frameLayout = new FrameLayout(getParentActivity());
             frameLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 0, 16, 0));
             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
@@ -356,6 +357,7 @@ public class GeneralSettingActivity extends BaseActivity {
             editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
             editText.setText(Config.getDeepLxApiToken());
             editText.setSelection(editText.length());
+            applyDeepLxInputTheme(editText);
             FrameLayout frameLayout = new FrameLayout(getParentActivity());
             frameLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 0, 16, 0));
             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
@@ -527,6 +529,7 @@ public class GeneralSettingActivity extends BaseActivity {
         editText.setInputType(InputType.TYPE_CLASS_NUMBER);
         editText.setText(String.valueOf(currentValue));
         editText.setSelection(editText.length());
+        applyDeepLxInputTheme(editText);
 
         FrameLayout frameLayout = new FrameLayout(getParentActivity());
         frameLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 0, 16, 0));
@@ -553,6 +556,12 @@ public class GeneralSettingActivity extends BaseActivity {
         });
         builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
         builder.show();
+    }
+
+    private void applyDeepLxInputTheme(EditTextBoldCursor editText) {
+        editText.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
+        editText.setHintTextColor(getThemedColor(Theme.key_dialogTextHint));
+        editText.setCursorColor(getThemedColor(Theme.key_dialogTextBlack));
     }
 
     @Override
