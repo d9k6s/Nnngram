@@ -34,6 +34,8 @@ import org.telegram.tgnet.TLRPC
 import xyz.nextalone.gen.Config
 import xyz.nextalone.nnngram.translate.BaseTranslator
 import xyz.nextalone.nnngram.translate.FormattedText
+import xyz.nextalone.nnngram.translate.RichMessageText
+import xyz.nextalone.nnngram.translate.RichMessageTextProcessor
 import xyz.nextalone.nnngram.utils.Log
 import java.io.IOException
 import java.net.URI
@@ -113,6 +115,9 @@ object DeepLxTranslator : BaseTranslator() {
     }
 
     override suspend fun translate(source: Any, from: String, to: String): TranslateResult {
+        if (source is RichMessageText) {
+            return translateRichMessage(source, canonicalTargetLanguage(to))
+        }
         if (source !is FormattedText || !Config.deepLxPreserveFormatting) {
             return super.translate(source, from, to)
         }
@@ -246,6 +251,70 @@ object DeepLxTranslator : BaseTranslator() {
     private suspend fun translateFormattedFallback(text: String, to: String): TranslateResult {
         val result = translateText(text, "auto", to)
         return TranslateResult(result.from, result.result?.let { FormattedText(it, ArrayList()) }, result.error)
+    }
+
+    private suspend fun translateRichMessage(source: RichMessageText, to: String): TranslateResult {
+        val (translatedMessage, textNodes) = RichMessageTextProcessor.translatedCopy(source.richMessage)
+            ?: return TranslateResult("auto", null, HttpStatusCode.InternalServerError)
+        if (textNodes.isEmpty()) {
+            return TranslateResult("auto", RichMessageText(translatedMessage))
+        }
+
+        val sourceText = StringBuilder()
+        val nodeRanges = ArrayList<IntRange>(textNodes.size)
+        val boundaries = sortedSetOf<Int>()
+        textNodes.forEachIndexed { index, node ->
+            if (index > 0) sourceText.append('\n')
+            val start = sourceText.length
+            sourceText.append(node.text)
+            val end = sourceText.length
+            boundaries.add(start)
+            boundaries.add(end)
+            nodeRanges.add(start until end)
+        }
+
+        val originalText = sourceText.toString()
+        val plan = DeepLxTextProcessor.createFormattingPlan(
+            originalText,
+            boundaries,
+            DeepLxTextProcessor.structuralWhitespaceRanges(originalText)
+        )
+        if (plan != null) {
+            val result = translateText(plan.markedText, "auto", to)
+            if (result.error != null || result.result == null) {
+                return TranslateResult(result.from, null, result.error ?: HttpStatusCode.InternalServerError)
+            }
+            val decoded = DeepLxTextProcessor.decodeFormatting(originalText, result.result, plan)
+            if (decoded != null) {
+                val translatedRanges = nodeRanges.map { range ->
+                    val start = decoded.mappedOffsets[range.first]
+                    val end = decoded.mappedOffsets[range.last + 1]
+                    if (start == null || end == null || end < start || end > decoded.text.length) null
+                    else start until end
+                }
+                if (translatedRanges.none { it == null }) {
+                    textNodes.forEachIndexed { index, node ->
+                        val range = translatedRanges[index]!!
+                        node.text = decoded.text.substring(range.first, range.last + 1)
+                    }
+                    return TranslateResult(result.from, RichMessageText(translatedMessage))
+                }
+            }
+            Log.w("DeepLX did not preserve rich-message boundaries; translating its text blocks separately")
+        }
+
+        var detectedLanguage = "auto"
+        for (node in textNodes) {
+            val result = translateText(node.text, "auto", to)
+            if (result.error != null || result.result == null) {
+                return TranslateResult(detectedLanguage, null, result.error ?: HttpStatusCode.InternalServerError)
+            }
+            if (result.from.isNotBlank() && !result.from.equals("auto", ignoreCase = true)) {
+                detectedLanguage = result.from
+            }
+            node.text = result.result
+        }
+        return TranslateResult(detectedLanguage, RichMessageText(translatedMessage))
     }
 
     private fun isProtectedEntity(entity: TLRPC.MessageEntity): Boolean = when (entity) {

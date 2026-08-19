@@ -378,6 +378,8 @@ import xyz.nextalone.nnngram.helpers.TranslateHelper;
 import xyz.nextalone.nnngram.helpers.TranslateHelper.Status;
 import xyz.nextalone.nnngram.translate.FormattedText;
 import xyz.nextalone.nnngram.translate.LanguageDetectorTimeout;
+import xyz.nextalone.nnngram.translate.RichMessageText;
+import xyz.nextalone.nnngram.translate.RichMessageTextProcessor;
 import xyz.nextalone.nnngram.ui.BackButtonRecentMenu;
 import xyz.nextalone.nnngram.ui.QuickSendMediaPopup;
 import xyz.nextalone.nnngram.ui.TranslatorSettingsPopupWrapper;
@@ -34018,6 +34020,8 @@ public class ChatActivity extends BaseFragment implements
                 messageObject.messageOwner.entities = pair.second;
             } else if (messageObject.originalMessage instanceof TLRPC.TL_poll) {
                 ((TLRPC.TL_messageMediaPoll) messageObject.messageOwner.media).poll = (TLRPC.TL_poll) messageObject.originalMessage;
+            } else if (messageObject.originalMessage instanceof TL_iv.RichMessage) {
+                messageObject.messageOwner.translatedRichMessage = null;
             }
             getMessageUtils().resetMessageContent(dialog_id, messageObject, false);
         } else {
@@ -34040,7 +34044,11 @@ public class ChatActivity extends BaseFragment implements
         }
         getMessageUtils().resetMessageContent(dialog_id, messageObject, false, true);
         Object original;
-        if (messageObject.isPoll()) {
+        boolean isDeepLxRichMessage = messageObject.messageOwner.rich_message != null &&
+            TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator;
+        if (isDeepLxRichMessage) {
+            original = messageObject.messageOwner.rich_message;
+        } else if (messageObject.isPoll()) {
             original = ((TLRPC.TL_messageMediaPoll) messageObject.messageOwner.media).poll;
         } else if (!TranslateHelper.getShowOriginal()) {
             original = Pair.create(messageObject.messageOwner.message, messageObject.messageOwner.entities);
@@ -34048,7 +34056,9 @@ public class ChatActivity extends BaseFragment implements
             original = messageObject.messageOwner.message;
         }
         Object message;
-        if (messageObject.isPoll()) {
+        if (isDeepLxRichMessage) {
+            message = new RichMessageText(messageObject.messageOwner.rich_message);
+        } else if (messageObject.isPoll()) {
             message = original;
         } else if (Config.deepLxPreserveFormatting &&
                 TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator) {
@@ -34091,6 +34101,15 @@ public class ChatActivity extends BaseFragment implements
                 }
             } else if (translation instanceof TLRPC.TL_poll) {
                 ((TLRPC.TL_messageMediaPoll) messageObject.messageOwner.media).poll = (TLRPC.TL_poll) translation;
+            } else if (translation instanceof RichMessageText && original instanceof TL_iv.RichMessage) {
+                TL_iv.RichMessage translatedRichMessage = ((RichMessageText) translation).getRichMessage();
+                if (TranslateHelper.getShowOriginal()) {
+                    translatedRichMessage = RichMessageTextProcessor.withOriginal(
+                        (TL_iv.RichMessage) original,
+                        translatedRichMessage
+                    );
+                }
+                messageObject.messageOwner.translatedRichMessage = translatedRichMessage;
             }
             getMessageUtils().resetMessageContent(dialog_id, messageObject, true, original, false, Pair.create(TextUtils.isEmpty(sourceLanguageT) ? sourceLanguage : sourceLanguageT, targetLanguageT));
             return Unit.INSTANCE;
