@@ -25,6 +25,11 @@ jobs:
     name: Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_MAXSIZE: "10G"
+      CCACHE_HARDLINK: "true"
 
     steps:
       - name: Check out source
@@ -44,6 +49,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ccache-test
+          restore-keys: ccache-test
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
