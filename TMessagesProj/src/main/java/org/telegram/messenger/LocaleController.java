@@ -896,26 +896,7 @@ public class LocaleController {
     }
 
     private static Locale getLocaleForLanguage(LocaleInfo localeInfo) {
-        String shortName = localeInfo.shortName == null ? "" : localeInfo.shortName.toLowerCase(Locale.US);
-        String baseLangCode = localeInfo.baseLangCode == null ? "" : localeInfo.baseLangCode.toLowerCase(Locale.US);
-        String pluralLangCode = localeInfo.pluralLangCode == null ? "" : localeInfo.pluralLangCode.toLowerCase(Locale.US);
-        // Telegram's built-in Chinese packs use server aliases instead of Android locale tags.
-        if ("taiwan".equals(shortName) || baseLangCode.startsWith("zh_hant") || pluralLangCode.equals("zh_tw") || pluralLangCode.equals("zh_hk") || pluralLangCode.equals("zh_mo")) {
-            return Locale.forLanguageTag("zh-Hant-TW");
-        }
-        if ("moecn".equals(shortName) || baseLangCode.startsWith("zh_hans") || pluralLangCode.equals("zh_cn") || pluralLangCode.equals("zh_sg")) {
-            return Locale.forLanguageTag("zh-Hans-CN");
-        }
-
-        String languageCode;
-        if (!TextUtils.isEmpty(localeInfo.pluralLangCode)) {
-            languageCode = localeInfo.pluralLangCode;
-        } else if (!TextUtils.isEmpty(localeInfo.baseLangCode)) {
-            languageCode = localeInfo.baseLangCode;
-        } else {
-            languageCode = localeInfo.shortName;
-        }
-        return Locale.forLanguageTag(languageCode.replace('_', '-'));
+        return LanguageResourceLocale.resolve(localeInfo.shortName, localeInfo.baseLangCode, localeInfo.pluralLangCode);
     }
 
     private Context getLocalizedResourcesContext() {
