@@ -21,6 +21,7 @@ package xyz.nextalone.nnngram.activity;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.transition.TransitionManager;
 import android.util.TypedValue;
@@ -66,7 +67,9 @@ import xyz.nextalone.nnngram.config.ConfigManager;
 import xyz.nextalone.nnngram.helpers.TranslateHelper;
 import xyz.nextalone.nnngram.helpers.TranslateHelper.ProviderType;
 import xyz.nextalone.nnngram.translate.providers.DeepLTranslator;
+import xyz.nextalone.nnngram.translate.providers.DeepLxTranslator;
 import xyz.nextalone.nnngram.ui.PopupBuilder;
+import xyz.nextalone.nnngram.utils.AlertUtil;
 import xyz.nextalone.nnngram.utils.Defines;
 
 @SuppressLint("NotifyDataSetChanged")
@@ -88,6 +91,8 @@ public class GeneralSettingActivity extends BaseActivity {
     private int showOriginalRow;
     private int deepLFormalityRow;
     private int deepLxApiRow;
+    private int deepLxApiTokenRow;
+    private int deepLxTestRow;
     private int translatorTypeRow;
     private int translationProviderRow;
     private int translationTargetRow;
@@ -95,6 +100,7 @@ public class GeneralSettingActivity extends BaseActivity {
     private int autoTranslateRow;
     private int editTextTranslationTargetRow;
     private int translator2Row;
+    private boolean deepLxTesting;
 
     private int llmSettingsRow;
     private int llmConfigRow;
@@ -287,46 +293,8 @@ public class GeneralSettingActivity extends BaseActivity {
                     listAdapter.notifyItemChanged(editTextTranslationTargetRow, PARTIAL);
                 }
                 if (!oldProvider.equals(TranslateHelper.getCurrentProviderType())) {
-                    boolean wasDeepLTranslator = oldProvider.equals(ProviderType.DeepLTranslator);
-                    boolean isDeepLTranslator = TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLTranslator);
-                    boolean wasDeepLxTranslator = oldProvider.equals(ProviderType.DeepLxTranslator);
-                    boolean isDeepLxTranslator = TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLxTranslator);
-                    boolean wasLLMTranslator = oldProvider.equals(ProviderType.LLMTranslator);
-                    boolean isLLMTranslator = TranslateHelper.getCurrentProviderType().equals(ProviderType.LLMTranslator);
-
-                    // Handle DeepL/DeepLx removal
-                    if (wasDeepLTranslator && !isDeepLxTranslator) {
-                        listAdapter.notifyItemRemoved(deepLFormalityRow);
-                    } else if (wasDeepLxTranslator) {
-                        listAdapter.notifyItemRemoved(deepLxApiRow);
-                        if (!isDeepLxTranslator) {
-                            listAdapter.notifyItemRemoved(deepLFormalityRow);
-                        }
-                    }
-
-                    // Handle LLM settings removal
-                    if (wasLLMTranslator && !isLLMTranslator) {
-                        for (int i = 0; i < 3; i++) {
-                            listAdapter.notifyItemRemoved(llmSettingsRow);
-                        }
-                    }
-
                     updateRows();
-
-                    // Handle DeepL/DeepLx insertion
-                    if (isDeepLTranslator) {
-                        listAdapter.notifyItemInserted(deepLFormalityRow);
-                    } else if (isDeepLxTranslator) {
-                        listAdapter.notifyItemInserted(deepLxApiRow);
-                        listAdapter.notifyItemInserted(deepLFormalityRow);
-                    }
-
-                    // Handle LLM settings insertion
-                    if (isLLMTranslator && !wasLLMTranslator) {
-                        for (int i = 0; i < 3; i++) {
-                            listAdapter.notifyItemInserted(llmSettingsRow + i);
-                        }
-                    }
+                    listAdapter.notifyDataSetChanged();
                 }
                 return Unit.INSTANCE;
             });
@@ -360,19 +328,43 @@ public class GeneralSettingActivity extends BaseActivity {
         } else if (position == deepLxApiRow) {
             EditTextBoldCursor editText = new EditTextBoldCursor(getParentActivity());
             editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            editText.setHint("DeepLx API Url"); // todo: string resource
+            editText.setHint(LocaleController.getString(R.string.DeepLxApiUrlHint));
             editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
+            editText.setSingleLine(true);
             editText.setText(Config.getDeepLxApi());
             FrameLayout frameLayout = new FrameLayout(getParentActivity());
             frameLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 0, 16, 0));
             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-            builder.setTitle("DeepLx API Url"); // todo: string resource
+            builder.setTitle(LocaleController.getString(R.string.DeepLxApiUrl));
             builder.setView(frameLayout);
             builder.setPositiveButton(LocaleController.getString("Save", R.string.Save), (dialogInterface, i) -> {
-                Config.setDeepLxApi(editText.getText().toString());
+                Config.setDeepLxApi(editText.getText().toString().trim());
+                listAdapter.notifyItemChanged(deepLxApiRow, PARTIAL);
             });
             builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
             builder.show();
+        } else if (position == deepLxApiTokenRow) {
+            EditTextBoldCursor editText = new EditTextBoldCursor(getParentActivity());
+            editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            editText.setHint(LocaleController.getString(R.string.DeepLxApiTokenHint));
+            editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
+            editText.setSingleLine(true);
+            editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            editText.setText(Config.getDeepLxApiToken());
+            editText.setSelection(editText.length());
+            FrameLayout frameLayout = new FrameLayout(getParentActivity());
+            frameLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 16, 0, 16, 0));
+            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+            builder.setTitle(LocaleController.getString(R.string.DeepLxApiToken));
+            builder.setView(frameLayout);
+            builder.setPositiveButton(LocaleController.getString("Save", R.string.Save), (dialogInterface, i) -> {
+                Config.setDeepLxApiToken(editText.getText().toString().trim());
+                listAdapter.notifyItemChanged(deepLxApiTokenRow, PARTIAL);
+            });
+            builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+            builder.show();
+        } else if (position == deepLxTestRow) {
+            testDeepLxConnection();
         } else if (position == translatorTypeRow) {
             var oldType = TranslateHelper.getCurrentStatus();
             TranslateHelper.showTranslatorTypeSelector(getParentActivity(), view, () -> {
@@ -454,6 +446,42 @@ public class GeneralSettingActivity extends BaseActivity {
         }
     }
 
+    private void testDeepLxConnection() {
+        if (deepLxTesting) {
+            return;
+        }
+        String apiUrl = Config.getDeepLxApi().trim();
+        if (TextUtils.isEmpty(apiUrl)) {
+            AlertUtil.showToast(LocaleController.getString(R.string.DeepLxApiUrlRequired));
+            return;
+        }
+        if (apiUrl.contains(DeepLxTranslator.API_TOKEN_PLACEHOLDER) && TextUtils.isEmpty(Config.getDeepLxApiToken().trim())) {
+            AlertUtil.showToast(LocaleController.getString(R.string.DeepLxApiTokenRequired));
+            return;
+        }
+
+        deepLxTesting = true;
+        String testText = "DeepLX connection test " + System.currentTimeMillis();
+        TranslateHelper.translate(testText, "en", "de", (translation, sourceLanguage, targetLanguage) -> {
+            deepLxTesting = false;
+            if (translation instanceof String && !TextUtils.isEmpty((String) translation)) {
+                AlertUtil.showToast(LocaleController.getString(R.string.DeepLxTestSuccess));
+            } else {
+                AlertUtil.showToast(LocaleController.getString(R.string.DeepLxTestInvalidResponse));
+            }
+            return Unit.INSTANCE;
+        }, error -> {
+            deepLxTesting = false;
+            String detail = error != null && !TextUtils.isEmpty(error.getMessage()) ? error.getMessage() :
+                LocaleController.getString(R.string.DeepLxUnknownError);
+            if (detail.length() > 100) {
+                detail = detail.substring(0, 100) + "...";
+            }
+            AlertUtil.showToast(LocaleController.formatString("DeepLxTestFailed", R.string.DeepLxTestFailed, detail));
+            return Unit.INSTANCE;
+        });
+    }
+
     @Override
     protected boolean onItemLongClick(View view, int position, float x, float y) {
         return false;
@@ -477,8 +505,11 @@ public class GeneralSettingActivity extends BaseActivity {
         if (TranslateHelper.getCurrentStatus() != TranslateHelper.Status.External) {
             showOriginalRow = TranslateHelper.getCurrentStatus() == TranslateHelper.Status.InMessage ? addRow("showOriginal") : -1;
             translationProviderRow = addRow("translationProvider");
-            deepLxApiRow = TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLxTranslator) ? addRow("deepLxApi") : -1;
-            deepLFormalityRow = (TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLTranslator) || TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLxTranslator)) ? addRow("deepLFormality") : -1;
+            boolean isDeepLxTranslator = TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLxTranslator);
+            deepLxApiRow = isDeepLxTranslator ? addRow("deepLxApi") : -1;
+            deepLxApiTokenRow = isDeepLxTranslator ? addRow("deepLxApiToken") : -1;
+            deepLxTestRow = isDeepLxTranslator ? addRow("deepLxTest") : -1;
+            deepLFormalityRow = TranslateHelper.getCurrentProviderType().equals(ProviderType.DeepLTranslator) ? addRow("deepLFormality") : -1;
             translationTargetRow = addRow("translationTarget");
             doNotTranslateRow = addRow("doNotTranslate");
             editTextTranslationTargetRow = addRow("editTextTranslationTarget");
@@ -487,6 +518,9 @@ public class GeneralSettingActivity extends BaseActivity {
             showOriginalRow = -1;
             translationProviderRow = -1;
             translationTargetRow = -1;
+            deepLxApiRow = -1;
+            deepLxApiTokenRow = -1;
+            deepLxTestRow = -1;
             deepLFormalityRow = -1;
             doNotTranslateRow = -1;
             editTextTranslationTargetRow = -1;
@@ -685,7 +719,13 @@ public class GeneralSettingActivity extends BaseActivity {
                         if (value.length() > 25) {
                             value = value.substring(0, 25) + "...";
                         }
-                        textCell.setTextAndValue(LocaleController.getString(R.string.DeepLxApi), value, payload, true);
+                        textCell.setTextAndValue(LocaleController.getString(R.string.DeepLxApiUrl), value, payload, true);
+                    } else if (position == deepLxApiTokenRow) {
+                        String value = TextUtils.isEmpty(Config.getDeepLxApiToken()) ?
+                            LocaleController.getString(R.string.DeepLxNotSet) : "••••••••";
+                        textCell.setTextAndValue(LocaleController.getString(R.string.DeepLxApiToken), value, payload, true);
+                    } else if (position == deepLxTestRow) {
+                        textCell.setText(LocaleController.getString(R.string.DeepLxTestConnection), true);
                     } else if (position == llmConfigRow) {
                         int llmProvider = ConfigManager.getIntOrDefault(Defines.llmProvider, 0);
                         String providerName = switch (llmProvider) {
@@ -863,7 +903,7 @@ public class GeneralSettingActivity extends BaseActivity {
                 return 1;
             } else if (position == tabsTitleTypeRow || position == translationProviderRow || position == deepLFormalityRow || position == translationTargetRow ||
                 position == translatorTypeRow || position == doNotTranslateRow || position == overrideDevicePerformanceRow || position == customTitleRow ||
-                position == deepLxApiRow || position == editTextTranslationTargetRow ||
+                position == deepLxApiRow || position == deepLxApiTokenRow || position == deepLxTestRow || position == editTextTranslationTargetRow ||
                 position == llmConfigRow) {
                 return 2;
             } else if (position == drawerRow || position == generalRow || position == translatorRow || position == devicesRow || position == storiesRow || position == llmSettingsRow) {

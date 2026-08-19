@@ -200,6 +200,7 @@ object Defines {
     const val translatorProvider = "translatorProvider"
     const val deepLFormality = "deepLFormality"
     @StringConfig("") const val deepLxApi = "deepLxApi"
+    @StringConfig("") const val deepLxApiToken = "deepLxApiToken"
     const val deepLxPreserveFormatting = "deepLxPreserveFormatting"
     const val translatorStatus = "translatorStatus"
     const val targetLanguage = "targetLanguage"

@@ -19,7 +19,6 @@
 
 package xyz.nextalone.nnngram.translate.providers
 
-import android.text.TextUtils
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -28,15 +27,13 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import org.json.JSONObject
 import xyz.nextalone.gen.Config
-import xyz.nextalone.nnngram.config.ConfigManager
 import xyz.nextalone.nnngram.translate.BaseTranslator
-import xyz.nextalone.nnngram.utils.Defines
 import xyz.nextalone.nnngram.utils.Log
 import java.io.IOException
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
-import java.util.UUID
-import java.util.regex.Matcher
-import java.util.regex.Pattern
 
 /**
  * @author NextAlone
@@ -45,27 +42,54 @@ import java.util.regex.Pattern
  */
 object DeepLxTranslator : BaseTranslator() {
 
+    const val API_TOKEN_PLACEHOLDER = "(API_TOKEN)"
+
     private val targetLanguages = listOf(
-        "bg", "cs", "da", "de", "el", "en-GB", "en-US", "en", "es", "et",
-        "fi", "fr", "hu", "id", "it", "ja", "lt", "lv", "nl", "pl", "pt-BR",
-        "pt-PT", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "zh"
+        "ar", "bg", "cs", "da", "de", "de-CH", "el", "en-GB", "en-US",
+        "es", "es-419", "et", "fi", "fr", "fr-CA", "he", "hu", "id", "it",
+        "ja", "ko", "lt", "lv", "nb", "nl", "pl", "pt-BR", "pt-PT", "ro",
+        "ru", "sk", "sl", "sv", "tr", "uk", "vi", "zh-Hans", "zh-Hant"
     )
 
     override fun getTargetLanguages(): List<String> = targetLanguages
 
     override fun convertLanguageCode(language: String, country: String?): String {
-        val languageLowerCase: String = language.lowercase(Locale.getDefault())
-        val code: String = if (!TextUtils.isEmpty(country)) {
-            val countryUpperCase: String = country!!.uppercase(Locale.getDefault())
-            if (targetLanguages.contains("$languageLowerCase-$countryUpperCase")) {
-                "$languageLowerCase-$countryUpperCase"
-            } else {
-                languageLowerCase
-            }
-        } else {
-            languageLowerCase
+        val languageLowerCase = language.lowercase(Locale.ROOT)
+        val countryUpperCase = country?.uppercase(Locale.ROOT).orEmpty()
+        return when (languageLowerCase) {
+            "en" -> if (countryUpperCase == "GB") "en-GB" else "en-US"
+            "pt" -> if (countryUpperCase == "PT") "pt-PT" else "pt-BR"
+            "zh" -> if (countryUpperCase in setOf("TW", "HK", "MO")) "zh-Hant" else "zh-Hans"
+            "de" -> if (countryUpperCase == "CH") "de-CH" else "de"
+            "fr" -> if (countryUpperCase == "CA") "fr-CA" else "fr"
+            "no" -> "nb"
+            "iw" -> "he"
+            "in" -> "id"
+            else -> canonicalTargetLanguage(languageLowerCase)
         }
-        return code
+    }
+
+    override fun supportLanguage(language: String): Boolean =
+        targetLanguages.contains(canonicalTargetLanguage(language))
+
+    override fun getTargetLanguage(language: String): String = if (language == "app") {
+        getCurrentAppLanguage()
+    } else {
+        canonicalTargetLanguage(language)
+    }
+
+    private fun canonicalTargetLanguage(language: String): String {
+        val normalized = language.replace('_', '-').lowercase(Locale.ROOT)
+        return when (normalized) {
+            "en" -> "en-US"
+            "pt" -> "pt-BR"
+            "zh", "zh-cn", "zh-sg" -> "zh-Hans"
+            "zh-tw", "zh-hk", "zh-mo" -> "zh-Hant"
+            "no" -> "nb"
+            "iw" -> "he"
+            "in" -> "id"
+            else -> targetLanguages.firstOrNull { it.equals(normalized, ignoreCase = true) } ?: normalized
+        }
     }
 
     override suspend fun translateText(text: String, from: String, to: String): RequestResult {
@@ -75,24 +99,18 @@ object DeepLxTranslator : BaseTranslator() {
         if (from == to) {
             return RequestResult(from, text)
         }
-        if (Config.deepLxApi.isEmpty()) {
-            throw IOException("DeepLx API or token is empty")
-        }
+        val apiUrl = resolveApiUrl()
 
-        client.post(Config.deepLxApi) {
-            contentType(ContentType.Application.Json)
-//            header("Referer", "https://www.deepl.com/")
-//            header("User-Agent", "DeepL/1.8(52) Android 13 (Pixel 5;aarch64)")
-//            header("Client-Id", uuid)
-//            header("x-instance", uuid)
-//            header("x-app-os-name", "Android")
-//            header("x-app-os-version", "13")
-//            header("x-app-version", "1.8")
-//            header("x-app-build", "52")
-//            header("x-app-device", "Pixel 5")
-//            header("x-app-instance-id", uuid)
-            setBody(getRequestBody(text, from, to))
-        }.let {
+        val response = try {
+            client.post(apiUrl) {
+                contentType(ContentType.Application.Json)
+                setBody(getRequestBody(text, from, to))
+            }
+        } catch (e: Exception) {
+            // A request exception may contain the expanded URL. Do not leak API tokens to logs/UI.
+            throw IOException("DeepLX request failed (${e.javaClass.simpleName})")
+        }
+        response.let {
             when (it.status) {
                 HttpStatusCode.OK -> {
                     val jsonObject = JSONObject(it.bodyAsText())
@@ -100,7 +118,7 @@ object DeepLxTranslator : BaseTranslator() {
                         throw IOException(jsonObject.getString("message"))
                     }
                     return RequestResult(
-                        jsonObject.getString("source_lang"),
+                        jsonObject.optString("source_lang", from),
                         jsonObject.getString("data")
                     )
                 }
@@ -113,35 +131,33 @@ object DeepLxTranslator : BaseTranslator() {
         }
     }
 
-    const val FORMALITY_DEFAULT = 0
-    const val FORMALITY_MORE = 1
-    const val FORMALITY_LESS = 2
-
+    private fun resolveApiUrl(): String {
+        val configuredUrl = Config.deepLxApi.trim()
+        if (configuredUrl.isEmpty()) {
+            throw IOException("DeepLX API URL is empty")
+        }
+        val configuredToken = Config.deepLxApiToken.trim()
+        if (configuredUrl.contains(API_TOKEN_PLACEHOLDER) && configuredToken.isEmpty()) {
+            throw IOException("DeepLX API token is empty")
+        }
+        val encodedToken = URLEncoder.encode(configuredToken, StandardCharsets.UTF_8.toString())
+            .replace("+", "%20")
+        val resolvedUrl = configuredUrl.replace(API_TOKEN_PLACEHOLDER, encodedToken)
+        val uri = runCatching { URI(resolvedUrl) }.getOrNull()
+        if (uri == null || uri.host.isNullOrEmpty() ||
+            (!uri.scheme.equals("http", ignoreCase = true) && !uri.scheme.equals("https", ignoreCase = true))) {
+            throw IOException("DeepLX API URL is invalid")
+        }
+        return resolvedUrl
+    }
 
     private fun getRequestBody(text: String, from: String, to: String): String {
-        var iCounter = 1
-        val iMatcher: Matcher = Pattern.compile("[i]").matcher(text)
-        while (iMatcher.find()) {
-            iCounter++
-        }
         val params = JSONObject().apply {
             put("text", text)
-            put("split_sentences", 1)
             put("source_lang", from)
             put("target_lang", to)
-            put("preserve_formatting", true)
-            put("formality", getFormalityString())
         }
 
         return params.toString()
-    }
-
-    private fun getFormalityString(): String? {
-        return when (ConfigManager.getIntOrDefault(Defines.deepLFormality, -1)) {
-            FORMALITY_DEFAULT -> "default"
-            FORMALITY_MORE -> "more"
-            FORMALITY_LESS -> "less"
-            else -> "default"
-        }
     }
 }
