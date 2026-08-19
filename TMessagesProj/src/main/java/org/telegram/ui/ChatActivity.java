@@ -34051,11 +34051,11 @@ public class ChatActivity extends BaseFragment implements
         if (messageObject.isPoll()) {
             message = original;
         } else if (Config.deepLxPreserveFormatting &&
-                TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator &&
-                messageObject.messageOwner.entities != null && !messageObject.messageOwner.entities.isEmpty()) {
+                TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator) {
             message = new FormattedText(
                 messageObject.messageOwner.message,
-                new ArrayList<>(messageObject.messageOwner.entities)
+                messageObject.messageOwner.entities == null ?
+                    new ArrayList<>() : new ArrayList<>(messageObject.messageOwner.entities)
             );
         } else {
             message = messageObject.messageOwner.message;

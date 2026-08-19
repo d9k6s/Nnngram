@@ -41,7 +41,6 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.ArrayList
 import java.util.Locale
-import java.util.TreeSet
 
 /**
  * @author NextAlone
@@ -124,7 +123,7 @@ object DeepLxTranslator : BaseTranslator() {
         val parts = DeepLxTextProcessor.split(
             text,
             Config.deepLxMaxCharacters.coerceIn(MIN_MAX_CHARACTERS, MAX_MAX_CHARACTERS),
-            Config.deepLxPreserveFormatting
+            false
         )
         val translated = StringBuilder()
         var detectedLanguage = from
@@ -203,50 +202,37 @@ object DeepLxTranslator : BaseTranslator() {
             entity.offset >= 0 && entity.length > 0 && entity.offset <= text.length &&
                 entity.length <= text.length - entity.offset
         }
-        if (validEntities.isEmpty()) {
-            val result = translateText(text, "auto", to)
-            return TranslateResult(result.from, result.result?.let { FormattedText(it, ArrayList()) }, result.error)
-        }
-
-        val boundaries = TreeSet<Int>()
-        boundaries.add(0)
-        boundaries.add(text.length)
+        val boundaries = sortedSetOf<Int>()
+        val protectedRanges = ArrayList<DeepLxTextProcessor.ProtectedRange>()
+        protectedRanges.addAll(DeepLxTextProcessor.structuralWhitespaceRanges(text))
         validEntities.forEach { entity ->
             boundaries.add(entity.offset)
             boundaries.add(entity.offset + entity.length)
+            if (isProtectedEntity(entity)) {
+                protectedRanges.add(
+                    DeepLxTextProcessor.ProtectedRange(entity.offset, entity.offset + entity.length)
+                )
+            }
+        }
+        val plan = DeepLxTextProcessor.createFormattingPlan(text, boundaries, protectedRanges)
+        if (plan == null) {
+            Log.w("Unable to allocate DeepLX formatting markers; using unformatted translation")
+            return translateFormattedFallback(text, to)
         }
 
-        val positions = boundaries.toList()
-        val mappedOffsets = HashMap<Int, Int>()
-        val translated = StringBuilder()
-        var detectedLanguage = "auto"
-        for (index in 0 until positions.lastIndex) {
-            val start = positions[index]
-            val end = positions[index + 1]
-            mappedOffsets[start] = translated.length
-            val segment = text.substring(start, end)
-            val protected = validEntities.any { entity ->
-                entity.offset <= start && entity.offset + entity.length >= end && isProtectedEntity(entity)
-            }
-            if (protected) {
-                translated.append(segment)
-            } else {
-                val result = translateText(segment, "auto", to)
-                if (result.error != null || result.result == null) {
-                    return TranslateResult(detectedLanguage, null, result.error ?: HttpStatusCode.InternalServerError)
-                }
-                if (result.from.isNotBlank() && !result.from.equals("auto", ignoreCase = true)) {
-                    detectedLanguage = result.from
-                }
-                translated.append(result.result)
-            }
-            mappedOffsets[end] = translated.length
+        val result = translateText(plan.markedText, "auto", to)
+        if (result.error != null || result.result == null) {
+            return TranslateResult(result.from, null, result.error ?: HttpStatusCode.InternalServerError)
         }
-
+        val decoded = DeepLxTextProcessor.decodeFormatting(text, result.result, plan)
+        if (decoded == null) {
+            Log.w("DeepLX did not preserve formatting markers; using unformatted translation")
+            return translateFormattedFallback(text, to)
+        }
         val translatedEntities = ArrayList<TLRPC.MessageEntity>()
         validEntities.forEach { entity ->
-            val newStart = mappedOffsets[entity.offset] ?: return@forEach
-            val newEnd = mappedOffsets[entity.offset + entity.length] ?: return@forEach
+            val newStart = decoded.mappedOffsets[entity.offset] ?: return@forEach
+            val newEnd = decoded.mappedOffsets[entity.offset + entity.length] ?: return@forEach
             if (newEnd <= newStart) return@forEach
             cloneEntity(entity)?.let { copy ->
                 copy.offset = newStart
@@ -254,7 +240,12 @@ object DeepLxTranslator : BaseTranslator() {
                 translatedEntities.add(copy)
             }
         }
-        return TranslateResult(detectedLanguage, FormattedText(translated.toString(), translatedEntities))
+        return TranslateResult(result.from, FormattedText(decoded.text, translatedEntities))
+    }
+
+    private suspend fun translateFormattedFallback(text: String, to: String): TranslateResult {
+        val result = translateText(text, "auto", to)
+        return TranslateResult(result.from, result.result?.let { FormattedText(it, ArrayList()) }, result.error)
     }
 
     private fun isProtectedEntity(entity: TLRPC.MessageEntity): Boolean = when (entity) {

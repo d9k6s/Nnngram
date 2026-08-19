@@ -14,6 +14,131 @@ package xyz.nextalone.nnngram.translate.providers
 internal object DeepLxTextProcessor {
     data class Part(val text: String, val translate: Boolean)
 
+    data class ProtectedRange(val start: Int, val end: Int)
+
+    data class FormattingPlan(
+        val markedText: String,
+        val markerByOffset: Map<Int, Char>,
+        val protectedRanges: List<ProtectedRange>
+    )
+
+    data class DecodedFormatting(
+        val text: String,
+        val mappedOffsets: Map<Int, Int>
+    )
+
+    /**
+     * Adds one private-use marker at each formatting boundary. The markers stay inside one
+     * contextual translation request and are removed after the translated offsets are known.
+     */
+    fun createFormattingPlan(
+        text: String,
+        boundaryOffsets: Collection<Int>,
+        protectedRanges: Collection<ProtectedRange>
+    ): FormattingPlan? {
+        val normalizedRanges = mergeProtectedRanges(text.length, protectedRanges)
+        val offsets = sortedSetOf<Int>()
+        boundaryOffsets.filterTo(offsets) { it in 0..text.length }
+        normalizedRanges.forEach { range ->
+            offsets.add(range.start)
+            offsets.add(range.end)
+        }
+        if (offsets.isEmpty()) {
+            return FormattingPlan(text, emptyMap(), emptyList())
+        }
+
+        val usedCharacters = text.toHashSet()
+        val markerByOffset = LinkedHashMap<Int, Char>()
+        var candidate = PRIVATE_USE_START
+        offsets.forEach { offset ->
+            while (candidate <= PRIVATE_USE_END && usedCharacters.contains(candidate.toChar())) {
+                candidate++
+            }
+            if (candidate > PRIVATE_USE_END) return null
+            markerByOffset[offset] = candidate.toChar()
+            candidate++
+        }
+
+        val marked = StringBuilder(text.length + markerByOffset.size)
+        var cursor = 0
+        markerByOffset.forEach { (offset, marker) ->
+            marked.append(text, cursor, offset)
+            marked.append(marker)
+            cursor = offset
+        }
+        marked.append(text, cursor, text.length)
+        return FormattingPlan(marked.toString(), markerByOffset, normalizedRanges)
+    }
+
+    /** Returns null when the translation service removed, duplicated, or corrupted a marker. */
+    fun decodeFormatting(
+        sourceText: String,
+        translatedMarkedText: String,
+        plan: FormattingPlan
+    ): DecodedFormatting? {
+        if (plan.markerByOffset.isEmpty()) {
+            return DecodedFormatting(translatedMarkedText, emptyMap())
+        }
+        val offsetByMarker = plan.markerByOffset.entries.associate { (offset, marker) -> marker to offset }
+        val markerCounts = HashMap<Char, Int>()
+        translatedMarkedText.forEach { character ->
+            if (offsetByMarker.containsKey(character)) {
+                markerCounts[character] = (markerCounts[character] ?: 0) + 1
+            }
+        }
+        if (plan.markerByOffset.values.any { markerCounts[it] != 1 }) return null
+
+        val protectedByStart = plan.protectedRanges.associateBy { it.start }
+        val mappedOffsets = HashMap<Int, Int>()
+        val decoded = StringBuilder(translatedMarkedText.length)
+        var index = 0
+        while (index < translatedMarkedText.length) {
+            val character = translatedMarkedText[index]
+            val sourceOffset = offsetByMarker[character]
+            if (sourceOffset == null) {
+                decoded.append(character)
+                index++
+                continue
+            }
+
+            mappedOffsets[sourceOffset] = decoded.length
+            val protectedRange = protectedByStart[sourceOffset]
+            if (protectedRange == null) {
+                index++
+                continue
+            }
+            val endMarker = plan.markerByOffset[protectedRange.end] ?: return null
+            val translatedEnd = translatedMarkedText.indexOf(endMarker, index + 1)
+            if (translatedEnd < 0) return null
+
+            val decodedStart = decoded.length
+            plan.markerByOffset.keys.forEach { offset ->
+                if (offset in protectedRange.start..protectedRange.end) {
+                    mappedOffsets[offset] = decodedStart + offset - protectedRange.start
+                }
+            }
+            decoded.append(sourceText, protectedRange.start, protectedRange.end)
+            index = translatedEnd + 1
+        }
+        if (!mappedOffsets.keys.containsAll(plan.markerByOffset.keys)) return null
+        return DecodedFormatting(decoded.toString(), mappedOffsets)
+    }
+
+    fun structuralWhitespaceRanges(text: String): List<ProtectedRange> {
+        val ranges = ArrayList<ProtectedRange>()
+        var index = 0
+        while (index < text.length) {
+            val end = structuralWhitespaceEnd(text, index)
+            if (end > index) {
+                ranges.add(ProtectedRange(index, end))
+                index = end
+            } else {
+                index += Character.charCount(text.codePointAt(index))
+            }
+        }
+        return ranges
+    }
+
     fun split(text: String, maxCharacters: Int, preserveFormatting: Boolean): List<Part> {
         if (text.isEmpty()) {
             return listOf(Part("", false))
@@ -158,4 +283,32 @@ internal object DeepLxTextProcessor {
             parts.add(part)
         }
     }
+
+    private fun mergeProtectedRanges(
+        textLength: Int,
+        ranges: Collection<ProtectedRange>
+    ): List<ProtectedRange> {
+        val sorted = ranges
+            .map { ProtectedRange(it.start.coerceIn(0, textLength), it.end.coerceIn(0, textLength)) }
+            .filter { it.end > it.start }
+            .sortedWith(compareBy<ProtectedRange> { it.start }.thenBy { it.end })
+        if (sorted.isEmpty()) return emptyList()
+
+        val merged = ArrayList<ProtectedRange>()
+        var current = sorted.first()
+        for (index in 1 until sorted.size) {
+            val next = sorted[index]
+            if (next.start <= current.end) {
+                current = ProtectedRange(current.start, maxOf(current.end, next.end))
+            } else {
+                merged.add(current)
+                current = next
+            }
+        }
+        merged.add(current)
+        return merged
+    }
+
+    private const val PRIVATE_USE_START = 0xE000
+    private const val PRIVATE_USE_END = 0xF8FF
 }
