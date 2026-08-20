@@ -354,6 +354,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -2082,7 +2083,9 @@ public class ChatActivity extends BaseFragment implements
                 selectedObjectGroup = getValidGroupedMessage(message);
                 switch (Config.getDoubleTab()) {
                     case Defines.doubleTabTranslate:
-                        if (!selectedObject.translated && LanguageDetector.hasSupport()) {
+                        if (!selectedObject.translated && getMessageUtils().isDeepLxRichMessage(selectedObject)) {
+                            translateOrResetMessage(selectedObject, "auto");
+                        } else if (!selectedObject.translated && LanguageDetector.hasSupport()) {
                             final AtomicBoolean waitForLangDetection = new AtomicBoolean(false);
                             final AtomicReference<Runnable> onLangDetectionDone = new AtomicReference(null);
                             final String[] fromLang = {null};
@@ -32670,21 +32673,22 @@ public class ChatActivity extends BaseFragment implements
                             popupLayout.getSwipeBack().openForeground(swipeBackIndex);
                             return true;
                         });
-                        final String[] fromLang = { null };
-                        cell.setVisibility(View.GONE);
-                        translatorSettingsPopupWrapper.windowLayout.setVisibility(View.GONE);
-                        if (!messageObject.translated && LanguageDetector.hasSupport()) {
+                        boolean isDeepLxRichMessage = getMessageUtils().isDeepLxRichMessage(messageObject);
+                        final String[] fromLang = { isDeepLxRichMessage ? "auto" : null };
+                        cell.setVisibility(View.VISIBLE);
+                        translatorSettingsPopupWrapper.windowLayout.setVisibility(View.VISIBLE);
+                        if (!messageObject.translated && LanguageDetector.hasSupport() && !isDeepLxRichMessage) {
                             LanguageDetectorTimeout.detectLanguage(cell, getMessageUtils().getMessagePlainText(messageObject), (String lang) -> {
                                     fromLang[0] = TranslateHelper.stripLanguageCode(lang);
                                     if (!TranslateHelper.isLanguageRestricted(lang) || (currentChat != null && (currentChat.has_link || ChatObject.isPublic(currentChat) || selectedObject.messageOwner.fwd_from != null)) && ("uk".equals(fromLang[0]) || "ru".equals(fromLang[0]))) {
                                         cell.setVisibility(View.VISIBLE);
                                         translatorSettingsPopupWrapper.windowLayout.setVisibility(View.VISIBLE);
+                                    } else {
+                                        cell.setVisibility(View.GONE);
+                                        translatorSettingsPopupWrapper.windowLayout.setVisibility(View.GONE);
                                     }
                                 }, null, waitForLangDetection, onLangDetectionDone
                             );
-                        } else {
-                            cell.setVisibility(View.VISIBLE);
-                            translatorSettingsPopupWrapper.windowLayout.setVisibility(View.VISIBLE);
                         }
                         cell.setOnClickListener(view -> {
                             if (selectedObject == null || i >= options.size() || getParentActivity() == null) {
@@ -34033,6 +34037,52 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
+    private void detectRichMessageLanguageForTranslation(
+            MessageObject messageObject,
+            Utilities.Callback<String> onTranslatable,
+            Runnable onRestricted,
+            Utilities.Callback<Exception> onFail) {
+        List<String> texts = RichMessageTextProcessor.translatableTexts(messageObject.messageOwner.rich_message);
+        if (texts.isEmpty()) {
+            onRestricted.run();
+            return;
+        }
+
+        AtomicBoolean completed = new AtomicBoolean(false);
+        AtomicBoolean failed = new AtomicBoolean(false);
+        AtomicInteger remaining = new AtomicInteger(texts.size());
+        AtomicReference<Exception> firstError = new AtomicReference<>();
+        Runnable finishOne = () -> {
+            if (remaining.decrementAndGet() != 0 || !completed.compareAndSet(false, true)) {
+                return;
+            }
+            if (failed.get()) {
+                onFail.run(firstError.get());
+            } else {
+                onRestricted.run();
+            }
+        };
+
+        for (String text : texts) {
+            LanguageDetector.detectLanguage(text, lang -> {
+                if (completed.get()) {
+                    return;
+                }
+                if (!TranslateHelper.isLanguageRestricted(lang)) {
+                    if (completed.compareAndSet(false, true)) {
+                        onTranslatable.run(TranslateHelper.stripLanguageCode(lang));
+                    }
+                } else {
+                    finishOne.run();
+                }
+            }, e -> {
+                failed.set(true);
+                firstError.compareAndSet(null, e);
+                finishOne.run();
+            });
+        }
+    }
+
     private void translateMessage(MessageObject messageObject, String sourceLanguage, boolean autoTranslate) {
         if (messageObject == null) {
             return;
@@ -34048,8 +34098,7 @@ public class ChatActivity extends BaseFragment implements
         }
         getMessageUtils().resetMessageContent(dialog_id, messageObject, false, true);
         Object original;
-        boolean isDeepLxRichMessage = messageObject.messageOwner.rich_message != null &&
-            TranslateHelper.getCurrentProviderType() == TranslateHelper.ProviderType.DeepLxTranslator;
+        boolean isDeepLxRichMessage = getMessageUtils().isDeepLxRichMessage(messageObject);
         if (isDeepLxRichMessage) {
             original = messageObject.messageOwner.rich_message;
         } else if (messageObject.isPoll()) {
@@ -39218,20 +39267,32 @@ public class ChatActivity extends BaseFragment implements
                     final var messageObject = messageCell.getMessageObject();
                     if (getMessageUtils().isMessageObjectAutoTranslatable(messageObject)) {
                         messageObject.translating = true;
-                        LanguageDetector.detectLanguage(
-                            getMessageUtils().getMessagePlainText(messageObject),
-                            (String lang) -> {
-                                if (!TranslateHelper.isLanguageRestricted(lang)) {
-                                    translateMessage(messageObject, TranslateHelper.stripLanguageCode(lang), true);
-                                } else {
-                                    messageObject.translating = false;
-                                }
-                            },
-                            (Exception e) -> {
+                        Utilities.Callback<Exception> onLanguageDetectionFailed = e -> {
                                 FileLog.e("mlkit: failed to detect language in message");
-                                e.printStackTrace();
+                                if (e != null) {
+                                    FileLog.e(e);
+                                }
                                 messageObject.translating = false;
-                            });
+                            };
+                        if (getMessageUtils().isDeepLxRichMessage(messageObject)) {
+                            detectRichMessageLanguageForTranslation(
+                                messageObject,
+                                lang -> translateMessage(messageObject, lang, true),
+                                () -> messageObject.translating = false,
+                                onLanguageDetectionFailed
+                            );
+                        } else {
+                            LanguageDetector.detectLanguage(
+                                getMessageUtils().getMessagePlainText(messageObject),
+                                (String lang) -> {
+                                    if (!TranslateHelper.isLanguageRestricted(lang)) {
+                                        translateMessage(messageObject, TranslateHelper.stripLanguageCode(lang), true);
+                                    } else {
+                                        messageObject.translating = false;
+                                    }
+                                },
+                                onLanguageDetectionFailed::run);
+                        }
                     }
                 }
 

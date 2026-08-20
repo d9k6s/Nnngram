@@ -51,8 +51,16 @@ object RichMessageTextProcessor {
 
     @JvmStatic
     fun hasTranslatableText(source: TL_iv.RichMessage?): Boolean {
-        if (source == null) return false
-        return collectTextNodes(source, includeProtected = false).any { hasLettersOrDigits(it.text) }
+        return translatableTexts(source).isNotEmpty()
+    }
+
+    /** Text leaves that may be sent to the translator, excluding links and other protected values. */
+    @JvmStatic
+    fun translatableTexts(source: TL_iv.RichMessage?): List<String> {
+        if (source == null) return emptyList()
+        return collectTextNodes(source, includeProtected = false)
+            .map { it.text }
+            .filter { hasLettersOrDigits(it) }
     }
 
     /** Builds the translated view used when the user asks to keep the original text visible. */

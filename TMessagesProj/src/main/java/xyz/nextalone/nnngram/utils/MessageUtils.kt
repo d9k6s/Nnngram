@@ -558,7 +558,7 @@ class MessageUtils(num: Int) : BaseController(num) {
         }
         return if (messageObject.isPoll) {
             true
-        } else if (isDeepLxTranslator() && messageObject.messageOwner.rich_message != null) {
+        } else if (isDeepLxRichMessage(messageObject)) {
             RichMessageTextProcessor.hasTranslatableText(messageObject.messageOwner.rich_message)
         } else !TextUtils.isEmpty(messageObject.messageOwner.message) && !isLinkOrEmojiOnlyMessage(messageObject)
     }
@@ -586,7 +586,7 @@ class MessageUtils(num: Int) : BaseController(num) {
                 pollText.append(answer.text)
             }
             pollText.toString()
-        } else if (isDeepLxTranslator() && messageObject.messageOwner.rich_message != null) {
+        } else if (isDeepLxRichMessage(messageObject)) {
             RichMessageTextProcessor.plainText(messageObject.messageOwner.rich_message)
         } else if (messageObject.isVoiceTranscriptionOpen) {
             messageObject.messageOwner.voiceTranscription
@@ -603,7 +603,7 @@ class MessageUtils(num: Int) : BaseController(num) {
             selectedObject
         } else if (selectedObject.isVoiceTranscriptionOpen && !TextUtils.isEmpty(selectedObject.messageOwner.voiceTranscription) && !TranscribeButton.isTranscribing(selectedObject)) {
             selectedObject
-        } else if (isDeepLxTranslator() && selectedObject.messageOwner.rich_message != null && RichMessageTextProcessor.hasTranslatableText(selectedObject.messageOwner.rich_message)) {
+        } else if (isDeepLxRichMessage(selectedObject) && RichMessageTextProcessor.hasTranslatableText(selectedObject.messageOwner.rich_message)) {
             selectedObject
         } else if (!selectedObject.isVoiceTranscriptionOpen && !TextUtils.isEmpty(selectedObject.messageOwner.message) && !isLinkOrEmojiOnlyMessage(selectedObject)) {
             selectedObject
@@ -641,6 +641,9 @@ class MessageUtils(num: Int) : BaseController(num) {
 
     private fun isDeepLxTranslator(): Boolean =
         TranslateHelper.currentProviderType == TranslateHelper.ProviderType.DeepLxTranslator
+
+    fun isDeepLxRichMessage(messageObject: MessageObject?): Boolean =
+        messageObject?.messageOwner?.rich_message != null && isDeepLxTranslator()
 
     private fun replaceMessagesObject(dialogId: Long, messageObject: MessageObject) {
         val arrayList = ArrayList<MessageObject>()
