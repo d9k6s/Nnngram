@@ -32660,7 +32660,11 @@ public class ChatActivity extends BaseFragment implements
                         if (messageObject == null) {
                             continue;
                         }
-                        var translatorSettingsPopupWrapper = new TranslatorSettingsPopupWrapper(this, popupLayout.getSwipeBack(), dialog_id, getTopicId(), getResourceProvider());
+                        var translatorSettingsPopupWrapper = new TranslatorSettingsPopupWrapper(this, popupLayout.getSwipeBack(), dialog_id, getTopicId(), getResourceProvider(), () -> {
+                            if (chatAdapter != null) {
+                                chatAdapter.notifyDataSetChanged();
+                            }
+                        });
                         int swipeBackIndex = popupLayout.addViewToSwipeBack(translatorSettingsPopupWrapper.windowLayout);
                         cell.setOnLongClickListener(view -> {
                             popupLayout.getSwipeBack().openForeground(swipeBackIndex);
@@ -39210,7 +39214,7 @@ public class ChatActivity extends BaseFragment implements
                     }
                 }
 
-                if ((currentChat != null && DialogConfig.isAutoTranslateEnable(currentChat.id, getTopicId()) || currentUser != null && DialogConfig.isAutoTranslateEnable(currentUser.id, 0)) && LanguageDetector.hasSupport() && TranslateHelper.getCurrentStatus() != TranslateHelper.Status.External) {
+                if ((currentChat != null && DialogConfig.isAutoTranslateEnable(dialog_id, getTopicId()) || currentUser != null && DialogConfig.isAutoTranslateEnable(currentUser.id, 0)) && LanguageDetector.hasSupport() && TranslateHelper.getCurrentStatus() != TranslateHelper.Status.External) {
                     final var messageObject = messageCell.getMessageObject();
                     if (getMessageUtils().isMessageObjectAutoTranslatable(messageObject)) {
                         messageObject.translating = true;
