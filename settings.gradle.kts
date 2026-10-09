@@ -27,7 +27,7 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
         google()
         mavenCentral()
@@ -54,7 +54,15 @@ develocity {
 rootProject.name = "Nnngram"
 include(
     ":TMessagesProj",
+    ":jlatexmath",
     ":libs:tcp2ws",
     ":libs:pangu",
-    ":libs:ksp"
+    ":libs:ksp",
 )
+project(":jlatexmath").projectDir = file("TMessagesProj/lib/jlatexmath/jlatexmath")
+
+gradle.extra["androidxMediaModulePrefix"] = "TMessagesProj_Modules:media3:media-"
+apply(from = file("TMessagesProj_Modules/media/core_settings.gradle"))
+// Gradle 9 rejects projects whose directory does not exist; the implicit ":TMessagesProj_Modules:media3"
+// parent created by the prefix above has none, so point it at the directory holding the modules.
+project(":TMessagesProj_Modules:media3").projectDir = file("TMessagesProj_Modules/media/libraries")

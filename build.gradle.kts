@@ -18,8 +18,8 @@
 @file:Suppress("UnstableApiUsage")
 
 plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.android.library) apply false
+    id("com.android.application") apply false
+    id("com.android.library") apply false
     alias(libs.plugins.firebase.crashlytics) apply false
     alias(libs.plugins.google.services) apply false
     alias(libs.plugins.kotlin.android) apply false
@@ -66,11 +66,49 @@ fun Project.configureBaseExtension() {
     }
 }
 
+// Strip JLatexMath fonts we don't ship (transitive AAR assets from
+// io.noties.markwon:ext-latex -> ru.noties:jlatexmath-android, ~764 KB total under
+// assets/org/scilab/forge/jlatexmath/fonts/). Has to live in the APK modules — a
+// library's androidResources.ignoreAssetsPattern doesn't filter packaging in apps
+// that consume it. Using subprojects keeps it in one place.
+//   keep:  base/, latin/, maths/, euler/  (\mathbb, \mathcal, \mathfrak still work)
+//   drop:  latin/optional/, maths/optional/  (~290 KB; \textbf/\textit/\mathds fall back)
+//          licences/                          (~20 KB; pure license text files)
 subprojects {
+    plugins.withId("com.android.application") {
+        extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
+            androidResources {
+                ignoreAssetsPattern =
+                    "!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:!optional:!licences:!*stmary*:!*eufb*"
+            }
+        }
+    }
     plugins.withId("com.android.application") {
         configureBaseExtension()
     }
     plugins.withId("com.android.library") {
         configureBaseExtension()
+    }
+
+    // The media3 source modules (TMessagesProj_Modules/media) may still declare their package only
+    // in the manifest; derive the namespace from it before the module's own script runs.
+    if (projectDir.absolutePath.contains("/TMessagesProj_Modules/media/")) {
+        plugins.withId("com.android.library") {
+            extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+                if (namespace == null) {
+                    val manifestFile = file("src/main/AndroidManifest.xml")
+                    if (manifestFile.exists()) {
+                        val manifestPackage = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(manifestFile)
+                            .documentElement
+                            .getAttribute("package")
+                        if (manifestPackage.isNotEmpty()) {
+                            namespace = manifestPackage
+                        }
+                    }
+                }
+            }
+        }
     }
 }

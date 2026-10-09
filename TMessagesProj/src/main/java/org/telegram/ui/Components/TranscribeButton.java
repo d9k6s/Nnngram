@@ -37,10 +37,8 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
-import org.telegram.messenger.TranslateController;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
-import org.telegram.messenger.utils.DrawableUtils;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
@@ -89,7 +87,7 @@ public class TranscribeButton {
         this.pressBounds = new Rect(this.bounds);
         this.pressBounds.inset(dp(8), dp(8));
 
-        outIconDrawable = new RLottieDrawable(R.raw.transcribe_out, "transcribe_out", dp(26), dp(26));
+        outIconDrawable = new RLottieDrawable(R.raw.transcribe_out, dp(26), dp(26));
         outIconDrawable.setCurrentFrame(0);
         outIconDrawable.setCallback(parent);
         outIconDrawable.setOnFinishCallback(() -> {
@@ -100,7 +98,7 @@ public class TranscribeButton {
         }, 19);
         outIconDrawable.setAllowDecodeSingleFrame(true);
 
-        inIconDrawable = new RLottieDrawable(R.raw.transcribe_in, "transcribe_in", dp(26), dp(26));
+        inIconDrawable = new RLottieDrawable(R.raw.transcribe_in, dp(26), dp(26));
         inIconDrawable.setCurrentFrame(0);
         inIconDrawable.setCallback(parent);
         inIconDrawable.setMasterParent(parent);
@@ -272,13 +270,13 @@ public class TranscribeButton {
         }
         if (newColor) {
             inIconDrawable.beginApplyLayerColors();
-            inIconDrawable.setLayerColor("Artboard Outlines.**", this.iconColor);
+            inIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
             inIconDrawable.commitApplyLayerColors();
             inIconDrawable.setAllowDecodeSingleFrame(true);
             inIconDrawable.updateCurrentFrame(0, false);
             inIconDrawable.setAlpha(inIconDrawableAlpha = (int) (Color.alpha(color)));
             outIconDrawable.beginApplyLayerColors();
-            outIconDrawable.setLayerColor("Artboard Outlines.**", this.iconColor);
+            outIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
             outIconDrawable.commitApplyLayerColors();
             outIconDrawable.setAllowDecodeSingleFrame(true);
             outIconDrawable.updateCurrentFrame(0, false);
@@ -591,7 +589,7 @@ public class TranscribeButton {
         public LoadingPointsDrawable(TextPaint textPaint) {
             this.paint = textPaint;
             float fontSize = textPaint.getTextSize() * 0.89f;
-            lottie = new RLottieDrawable(R.raw.dots_loading, "dots_loading", (int) fontSize, (int) (fontSize * 1.25f));
+            lottie = new RLottieDrawable(R.raw.dots_loading, (int) fontSize, (int) (fontSize * 1.25f));
             lottie.setCallback(callback);
             lottie.setAutoRepeat(1);
             lottie.setCurrentFrame((int) (SystemClock.elapsedRealtime() / 16f % 60f));
@@ -601,7 +599,7 @@ public class TranscribeButton {
 
         public void setColor(int color) {
             lottie.beginApplyLayerColors();
-            lottie.setLayerColor("Comp 1.**", color);
+            lottie.setLayerColor("Comp 1", color);
             lottie.commitApplyLayerColors();
             lottie.setAllowDecodeSingleFrame(true);
             lottie.updateCurrentFrame(0, false);
